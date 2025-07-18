@@ -1,0 +1,27 @@
+# Node dependencies
+node_modules/
+
+# Hardhat build artifacts
+artifacts/
+cache/
+coverage/
+typechain/
+typechain-types/
+
+# Hardhat log files
+*.log
+
+# Environment variables
+.env
+
+# VSCode settings
+.vscode/
+
+# MacOS system files
+.DS_Store
+
+# Optional: OS generated files
+Thumbs.db
+
+# npm debug log
+npm-debug.log*
