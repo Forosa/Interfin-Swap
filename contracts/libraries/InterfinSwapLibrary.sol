@@ -1,30 +1,43 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.6.12;
+pragma solidity ^0.8.20;
 
 import "../interfaces/IInterfinSwapFactory.sol";
 import "../interfaces/IInterfinSwapPair.sol";
-import "@openzeppelin/contracts/math/SafeMath.sol";
 
 library InterfinSwapLibrary {
-    using SafeMath for uint256;
-
+    /// @notice Returns sorted token addresses to ensure uniqueness/order
     function sortTokens(address tokenA, address tokenB) internal pure returns (address token0, address token1) {
         require(tokenA != tokenB, "InterfinSwapLibrary: IDENTICAL_ADDRESSES");
         (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
         require(token0 != address(0), "InterfinSwapLibrary: ZERO_ADDRESS");
     }
 
-    function pairFor(address factory, address tokenA, address tokenB) internal pure returns (address pair) {
+    /// @notice Calculates the CREATE2 address for a pair without making any external calls
+    function pairFor(
+        address factory, 
+        address tokenA, 
+        address tokenB, 
+        bytes32 initCodeHash
+    ) internal pure returns (address pair) {
         (address token0, address token1) = sortTokens(tokenA, tokenB);
-        pair = address(uint256(keccak256(abi.encodePacked(
-            hex'ff',
-            factory,
-            keccak256(abi.encodePacked(token0, token1)),
-            hex'e18a34eb0e04b04e2b11d19b3b7e4c280b6cca16e7ba6f6f0a0c9e3a7c4f1e3b'
-        ))));
+        pair = address(uint160(uint(
+            keccak256(
+                abi.encodePacked(
+                    hex'ff',
+                    factory,
+                    keccak256(abi.encodePacked(token0, token1)),
+                    initCodeHash
+                )
+            )
+        )));
     }
 
-    function getReserves(address factory, address tokenA, address tokenB) internal view returns (uint reserveA, uint reserveB) {
+    /// @notice Fetches and sorts the reserves for a pair
+    function getReserves(
+        address factory, 
+        address tokenA, 
+        address tokenB
+    ) internal view returns (uint reserveA, uint reserveB) {
         (address token0,) = sortTokens(tokenA, tokenB);
         address pair = IInterfinSwapFactory(factory).getPair(tokenA, tokenB);
         require(pair != address(0), "InterfinSwapLibrary: PAIR_NOT_FOUND");
@@ -32,40 +45,65 @@ library InterfinSwapLibrary {
         (reserveA, reserveB) = tokenA == token0 ? (reserve0, reserve1) : (reserve1, reserve0);
     }
 
-    function quote(uint amountA, uint reserveA, uint reserveB) internal pure returns (uint amountB) {
+    /// @notice Given an amount of an asset and pair reserves, returns an equivalent amount of the other asset
+    function quote(
+        uint amountA, 
+        uint reserveA, 
+        uint reserveB
+    ) internal pure returns (uint amountB) {
         require(amountA > 0, "InterfinSwapLibrary: INSUFFICIENT_AMOUNT");
         require(reserveA > 0 && reserveB > 0, "InterfinSwapLibrary: INSUFFICIENT_LIQUIDITY");
-        amountB = amountA.mul(reserveB) / reserveA;
+        amountB = (amountA * reserveB) / reserveA;
     }
 
-    function getAmountOut(uint amountIn, uint reserveIn, uint reserveOut) internal pure returns (uint amountOut) {
+    /// @notice Given an input amount of an asset and pair reserves, returns the maximum output amount of the other asset
+    function getAmountOut(
+        uint amountIn, 
+        uint reserveIn, 
+        uint reserveOut
+    ) internal pure returns (uint amountOut) {
         require(amountIn > 0, "InterfinSwapLibrary: INSUFFICIENT_INPUT_AMOUNT");
         require(reserveIn > 0 && reserveOut > 0, "InterfinSwapLibrary: INSUFFICIENT_LIQUIDITY");
-        uint amountInWithFee = amountIn.mul(997);
-        uint numerator = amountInWithFee.mul(reserveOut);
-        uint denominator = reserveIn.mul(1000).add(amountInWithFee);
+        uint amountInWithFee = amountIn * 997;
+        uint numerator = amountInWithFee * reserveOut;
+        uint denominator = reserveIn * 1000 + amountInWithFee;
         amountOut = numerator / denominator;
     }
 
-    function getAmountIn(uint amountOut, uint reserveIn, uint reserveOut) internal pure returns (uint amountIn) {
+    /// @notice Given an output amount of an asset and pair reserves, returns a required input amount of the other asset
+    function getAmountIn(
+        uint amountOut, 
+        uint reserveIn, 
+        uint reserveOut
+    ) internal pure returns (uint amountIn) {
         require(amountOut > 0, "InterfinSwapLibrary: INSUFFICIENT_OUTPUT_AMOUNT");
         require(reserveIn > 0 && reserveOut > 0, "InterfinSwapLibrary: INSUFFICIENT_LIQUIDITY");
-        uint numerator = reserveIn.mul(amountOut).mul(1000);
-        uint denominator = reserveOut.sub(amountOut).mul(997);
-        amountIn = (numerator / denominator).add(1);
+        uint numerator = reserveIn * amountOut * 1000;
+        uint denominator = (reserveOut - amountOut) * 997;
+        amountIn = (numerator / denominator) + 1;
     }
 
-    function getAmountsOut(address factory, uint amountIn, address[] memory path) internal view returns (uint[] memory amounts) {
+    /// @notice Performs chained getAmountOut calculations on any number of pairs
+    function getAmountsOut(
+        address factory, 
+        uint amountIn, 
+        address[] memory path
+    ) internal view returns (uint[] memory amounts) {
         require(path.length >= 2, "InterfinSwapLibrary: INVALID_PATH");
         amounts = new uint[](path.length);
         amounts[0] = amountIn;
-        for (uint i; i < path.length - 1; i++) {
+        for (uint i = 0; i < path.length - 1; i++) {
             (uint reserveIn, uint reserveOut) = getReserves(factory, path[i], path[i + 1]);
             amounts[i + 1] = getAmountOut(amounts[i], reserveIn, reserveOut);
         }
     }
 
-    function getAmountsIn(address factory, uint amountOut, address[] memory path) internal view returns (uint[] memory amounts) {
+    /// @notice Performs chained getAmountIn calculations on any number of pairs
+    function getAmountsIn(
+        address factory, 
+        uint amountOut, 
+        address[] memory path
+    ) internal view returns (uint[] memory amounts) {
         require(path.length >= 2, "InterfinSwapLibrary: INVALID_PATH");
         amounts = new uint[](path.length);
         amounts[amounts.length - 1] = amountOut;
